@@ -1,66 +1,149 @@
-"""Wspólna konfiguracja: klucz API, adresy endpointów, nagłówki, ładowanie ustawień."""
+"""Konfiguracja projektu.
+
+Pliki w config_files/:
+  config.json      - WSZYSTKIE ustawienia, pogrupowane wg etapów procesu:
+                       input  -> skąd brać pliki i gdzie zapisywać wyniki
+                       upload -> POST /v3/upload
+                       ocr    -> wybór dostawcy OCR + tryb + parametry  (POST /v3/universal-ai)
+                       llm    -> wybór modelu LLM + parametry           (POST /v3/chat/completions)
+  .env             - sekret: EDENAI_API_KEY (osobno, bo nie trafia do gita)
+  llm_prompt.txt   - prompt systemowy LLM (osobno, bo to długi tekst wielowierszowy)
+
+Pierwszeństwo: argumenty wiersza poleceń > config.json (lub --config <plik>) > DEFAULTS poniżej.
+Klucze zaczynające się od "_" w config.json to komentarze i są pomijane.
+"""
+import argparse
+import copy
 import json
 import os
 import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-OUTPUT_DIR = BASE_DIR / "output"
-CONFIG_DIR = BASE_DIR / "config_files"  # .env, settings.json, ocr_app.json, api.json, llm_prompt.txt
+CONFIG_DIR = BASE_DIR / "config_files"
+DEFAULT_CONFIG_FILE = CONFIG_DIR / "config.json"
+ENV_FILE = CONFIG_DIR / ".env"
 
-# Ustawienia API: wartości domyślne, nadpisywane przez config_files/api.json (jeśli istnieje).
-API_CONFIG_FILE = CONFIG_DIR / "api.json"
-API_DEFAULTS = {
-    "upload_url": "https://api.edenai.run/v3/upload",
-    "ocr_url": "https://api.edenai.run/v3/universal-ai",
-    "ocr_async_url": "https://api.edenai.run/v3/universal-ai/async",
-    "llm_url": "https://api.edenai.run/v3/chat/completions",
-    "upload_purpose": "ocr",
-    "upload_timeout_s": 120,
-    "ocr_timeout_s": 300,
-    "ocr_async_create_timeout_s": 120,
-    "ocr_async_poll_timeout_s": 60,
-    "llm_timeout_s": 300,
-    "llm_temperature": 0,
-    "llm_prompt_file": "config_files/llm_prompt.txt",
+# Jedyne miejsce z wartościami domyślnymi w kodzie; config.json ma identyczną strukturę.
+DEFAULTS = {
+    "input": {
+        "paths": ["input_files"],  # pliki lub foldery (foldery rekurencyjnie), względem projektu
+        "extensions": [".docx", ".doc", ".odt", ".rtf", ".pdf", ".png", ".jpg", ".jpeg"],
+        "output_dir": "output",
+    },
+    "upload": {
+        "url": "https://api.edenai.run/v3/upload",
+        "purpose": "ocr",
+        "timeout_s": 120,
+    },
+    "ocr": {
+        "provider": "mistral",  # model Eden AI: ocr/ocr/<provider> lub ocr/ocr_async/<provider>
+        "mode": "sync",         # "sync" (ocr/ocr) albo "async" (ocr/ocr_async, z odpytywaniem)
+        "language": None,       # np. "pl"; None = autodetekcja dostawcy
+        "url": "https://api.edenai.run/v3/universal-ai",
+        "async_url": "https://api.edenai.run/v3/universal-ai/async",
+        "timeout_s": 300,       # zapytanie sync oraz utworzenie zadania async
+        "poll_interval_s": 3,
+        "poll_max_attempts": 120,
+        "poll_timeout_s": 60,
+    },
+    "llm": {
+        "model": "openai/gpt-4o",  # <dostawca>/<model> w Eden AI
+        "temperature": 0,
+        "prompt_file": "config_files/llm_prompt.txt",
+        "url": "https://api.edenai.run/v3/chat/completions",
+        "timeout_s": 300,
+    },
 }
 
+# Aktualne ustawienia. Moduły czytają CFG w chwili wywołania, więc argumenty CLI
+# zastosowane w parse_cli() działają wszędzie.
+CFG: dict = {}
 
-def _load_api_config() -> dict:
-    cfg = dict(API_DEFAULTS)
-    if API_CONFIG_FILE.exists():
+
+def project_path(p: str | Path) -> Path:
+    """Ścieżka względna z konfiguracji -> względem folderu projektu."""
+    return BASE_DIR / p
+
+
+def load_config(path: Path | None = None, verbose: bool = False) -> dict:
+    """Wczytuje DEFAULTS + plik JSON do CFG. path=None -> config.json, jeśli istnieje."""
+    cfg = copy.deepcopy(DEFAULTS)
+    file = path or DEFAULT_CONFIG_FILE
+    if file.exists():
         try:
-            data = json.loads(API_CONFIG_FILE.read_text(encoding="utf-8"))
+            data = json.loads(file.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
-            sys.exit(f"Niepoprawny JSON w {API_CONFIG_FILE}: {e}")
-        unknown = set(data) - set(API_DEFAULTS)
-        if unknown:
-            sys.exit(f"Nieznane klucze w {API_CONFIG_FILE}: {sorted(unknown)} (dozwolone: {sorted(API_DEFAULTS)})")
-        cfg.update(data)
+            sys.exit(f"Niepoprawny JSON w {file}: {e}")
+        for section, values in data.items():
+            if section.startswith("_"):
+                continue
+            if section not in cfg:
+                sys.exit(f"Nieznana sekcja '{section}' w {file} (dozwolone: {sorted(cfg)})")
+            for key, value in values.items():
+                if key.startswith("_"):
+                    continue
+                if key not in cfg[section]:
+                    sys.exit(f"Nieznany klucz '{section}.{key}' w {file} "
+                             f"(dozwolone: {sorted(cfg[section])})")
+                cfg[section][key] = value
+        if verbose:
+            print(f"Konfiguracja: {file}")
+    elif path:  # podany wprost, a nie istnieje -> błąd
+        sys.exit(f"Plik konfiguracyjny nie istnieje: {path}")
+    elif verbose:
+        print("Brak config_files/config.json - używam argumentów i wartości domyślnych")
+    CFG.clear()
+    CFG.update(cfg)
+    return CFG
+
+
+def parse_cli(description: str, with_llm: bool = True, argv=None) -> dict:
+    """Wspólne argumenty dla main.py i ocr_app.py; wczytuje config i nakłada na niego argumenty."""
+    ap = argparse.ArgumentParser(description=description)
+    ap.add_argument("paths", nargs="*", metavar="PATH",
+                    help="pliki lub foldery do przetworzenia (zastępują input.paths)")
+    ap.add_argument("-c", "--config", type=Path, default=None,
+                    help="plik ustawień (domyślnie config_files/config.json, jeśli istnieje)")
+    g = ap.add_argument_group("input")
+    g.add_argument("-e", "--extensions", nargs="+", metavar="EXT", help="np. .pdf .docx (kropka opcjonalna)")
+    g.add_argument("-o", "--output-dir", help="folder wyjściowy")
+    g = ap.add_argument_group("ocr")
+    g.add_argument("--ocr-provider", help="np. mistral, amazon, google, microsoft")
+    g.add_argument("--ocr-mode", choices=["sync", "async"])
+    g.add_argument("--ocr-language", help="np. pl")
+    g.add_argument("--ocr-poll-interval", type=float, metavar="S", help="sekundy między odpytaniami (async)")
+    g.add_argument("--ocr-poll-max-attempts", type=int, metavar="N", help="maks. liczba odpytań (async)")
+    if with_llm:
+        g = ap.add_argument_group("llm")
+        g.add_argument("--llm-model", help="np. openai/gpt-4o")
+        g.add_argument("--llm-temperature", type=float)
+    a = ap.parse_args(argv)
+
+    cfg = load_config(a.config, verbose=True)
+    overrides = {
+        ("input", "paths"): [str(Path(p).resolve()) for p in a.paths] or None,
+        ("input", "extensions"): [e if e.startswith(".") else f".{e}" for e in a.extensions or []] or None,
+        ("input", "output_dir"): str(Path(a.output_dir).resolve()) if a.output_dir else None,
+        ("ocr", "provider"): a.ocr_provider,
+        ("ocr", "mode"): a.ocr_mode,
+        ("ocr", "language"): a.ocr_language,
+        ("ocr", "poll_interval_s"): a.ocr_poll_interval,
+        ("ocr", "poll_max_attempts"): a.ocr_poll_max_attempts,
+        ("llm", "model"): getattr(a, "llm_model", None),
+        ("llm", "temperature"): getattr(a, "llm_temperature", None),
+    }
+    for (section, key), value in overrides.items():
+        if value is not None:
+            cfg[section][key] = value
     return cfg
-
-
-API = _load_api_config()
-UPLOAD_URL = API["upload_url"]
-OCR_URL = API["ocr_url"]
-OCR_ASYNC_URL = API["ocr_async_url"]
-LLM_URL = API["llm_url"]
-
-
-def load_llm_prompt() -> str:
-    """Czyta prompt systemowy LLM z pliku wskazanego w api.json (ścieżka względem projektu)."""
-    path = BASE_DIR / API["llm_prompt_file"]
-    if not path.exists():
-        sys.exit(f"Brak pliku z promptem LLM: {path}")
-    return path.read_text(encoding="utf-8").strip()
 
 
 def load_api_key() -> str:
     """Czyta klucz z EDENAI_API_KEY albo z pliku config_files/.env."""
     key = os.environ.get("EDENAI_API_KEY")
-    env_file = CONFIG_DIR / ".env"
-    if not key and env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
+    if not key and ENV_FILE.exists():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("EDENAI_API_KEY="):
                 key = line.split("=", 1)[1].strip()
     if not key:
@@ -84,38 +167,12 @@ def parse_response(response) -> dict:
     return data
 
 
-def resolve_settings(defaults: dict, cli: dict, config_path: Path | None, default_config: Path,
-                     path_keys: tuple = (), path_list_keys: tuple = ()) -> dict:
-    """Łączy ustawienia: argumenty CLI > plik konfiguracyjny JSON > wartości domyślne.
+def load_llm_prompt() -> str:
+    """Prompt systemowy LLM z pliku llm.prompt_file."""
+    path = project_path(CFG["llm"]["prompt_file"])
+    if not path.exists():
+        sys.exit(f"Brak pliku z promptem LLM: {path}")
+    return path.read_text(encoding="utf-8").strip()
 
-    - config_path: plik z --config (musi istnieć) albo None -> default_config (opcjonalny).
-    - cli: argumenty argparse; None / [] oznacza "nie podano" i nie nadpisuje.
-    - path_keys / path_list_keys: klucze ze ścieżkami; ścieżki względne z pliku
-      konfiguracyjnego są liczone od folderu projektu.
-    """
-    settings = dict(defaults)
 
-    path = config_path or default_config
-    if path.exists():
-        print(f"Konfiguracja: {path}")
-        try:
-            cfg = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            sys.exit(f"Niepoprawny JSON w {path}: {e}")
-        unknown = set(cfg) - set(defaults)
-        if unknown:
-            sys.exit(f"Nieznane klucze w {path}: {sorted(unknown)} (dozwolone: {sorted(defaults)})")
-        for k in path_keys:
-            if cfg.get(k):
-                cfg[k] = str(BASE_DIR / cfg[k])
-        for k in path_list_keys:
-            if k in cfg:
-                cfg[k] = [str(BASE_DIR / p) for p in cfg[k]]
-        settings.update(cfg)
-    elif config_path:  # podany wprost, a nie istnieje -> błąd
-        sys.exit(f"Plik konfiguracyjny nie istnieje: {config_path}")
-    else:
-        print("Brak pliku konfiguracyjnego - używam argumentów i wartości domyślnych")
-
-    settings.update({k: v for k, v in cli.items() if k in defaults and v not in (None, [])})
-    return settings
+load_config()  # domyślne ustawienia już przy imporcie (moduły działają też bez parse_cli)

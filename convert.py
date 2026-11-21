@@ -4,12 +4,10 @@ OCR w Eden AI przyjmuje tylko PDF albo obraz, więc .docx/.doc trzeba najpierw p
 """
 from pathlib import Path
 
-from config import OUTPUT_DIR
-
 WORD_FORMATS = (".docx", ".doc", ".odt", ".rtf")
 
 
-def to_pdf(src: str | Path, out_dir: str | Path = OUTPUT_DIR, out_name: str | None = None) -> Path:
+def to_pdf(src: str | Path, out_dir: str | Path, out_name: str | None = None) -> Path:
     """Zwraca ścieżkę do PDF. Plik PDF/obraz zwraca bez zmian."""
     src = Path(src)
     if src.suffix.lower() not in WORD_FORMATS:

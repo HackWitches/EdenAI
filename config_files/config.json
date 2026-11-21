@@ -1,0 +1,38 @@
+{
+  "_info": "Wszystkie ustawienia projektu. Klucze zaczynające się od _ to komentarze. Argumenty wiersza poleceń mają pierwszeństwo (python main.py --help).",
+
+  "input": {
+    "_info": "Skąd brać pliki i gdzie zapisywać wyniki. Ścieżki względne liczone od folderu projektu.",
+    "paths": ["input_files"],
+    "extensions": [".docx", ".doc", ".odt", ".rtf", ".pdf", ".png", ".jpg", ".jpeg"],
+    "output_dir": "output"
+  },
+
+  "upload": {
+    "url": "https://api.edenai.run/v3/upload",
+    "purpose": "ocr",
+    "timeout_s": 120
+  },
+
+  "ocr": {
+    "_info": "Wybór dostawcy OCR (mistral, amazon, google, microsoft, ...) i trybu: sync = ocr/ocr, async = ocr/ocr_async z odpytywaniem.",
+    "provider": "mistral",
+    "mode": "sync",
+    "language": null,
+    "url": "https://api.edenai.run/v3/universal-ai",
+    "async_url": "https://api.edenai.run/v3/universal-ai/async",
+    "timeout_s": 300,
+    "poll_interval_s": 3,
+    "poll_max_attempts": 120,
+    "poll_timeout_s": 60
+  },
+
+  "llm": {
+    "_info": "Wybór modelu LLM w formacie <dostawca>/<model>. Prompt systemowy w pliku prompt_file.",
+    "model": "openai/gpt-4o",
+    "temperature": 0,
+    "prompt_file": "config_files/llm_prompt.txt",
+    "url": "https://api.edenai.run/v3/chat/completions",
+    "timeout_s": 300
+  }
+}

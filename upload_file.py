@@ -1,19 +1,18 @@
-"""Krok 2: upload pliku - POST https://api.edenai.run/v3/upload"""
+"""Krok 2: upload pliku - POST /v3/upload  (ustawienia: config.json -> "upload")"""
 import sys
 from pathlib import Path
 
 import requests
 
-from config import API, UPLOAD_URL, auth_headers, parse_response
+from config import CFG, auth_headers, parse_response
 
 
 def upload_file(file_path: str | Path, purpose: str | None = None) -> dict:
-    """Wysyła plik do Eden AI i zwraca odpowiedź (file_id, file_name, file_size, expires_at...).
-    purpose=None -> wartość "upload_purpose" z config_files/api.json."""
+    """Wysyła plik do Eden AI i zwraca odpowiedź (file_id, file_name, file_size, expires_at...)."""
+    up = CFG["upload"]
     with open(file_path, "rb") as f:
-        response = requests.post(UPLOAD_URL, headers=auth_headers(), files={"file": f},
-                                 data={"purpose": purpose or API["upload_purpose"]},
-                                 timeout=API["upload_timeout_s"])
+        response = requests.post(up["url"], headers=auth_headers(), files={"file": f},
+                                 data={"purpose": purpose or up["purpose"]}, timeout=up["timeout_s"])
     result = parse_response(response)
     if "file_id" not in result:
         sys.exit(f"Brak file_id w odpowiedzi uploadu: {result}")

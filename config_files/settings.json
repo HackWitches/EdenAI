@@ -1,9 +1,0 @@
-{
-  "input_paths": [
-    "input_files"
-  ],
-  "extensions": [".docx", ".doc", ".odt", ".rtf", ".pdf", ".png", ".jpg", ".jpeg"],
-  "output_dir": "output",
-  "ocr_provider": "mistral",
-  "llm_model": "openai/gpt-4o"
-}

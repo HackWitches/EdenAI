@@ -1,26 +1,25 @@
-"""Krok 4: tekst z OCR -> JSON przez LLM - POST https://api.edenai.run/v3/chat/completions
-(format zgodny z OpenAI Chat Completions)
+"""Krok 4: tekst z OCR -> JSON przez LLM - POST /v3/chat/completions  (ustawienia: config.json -> "llm")
+(format zgodny z OpenAI Chat Completions; prompt systemowy w config_files/llm_prompt.txt)
 """
 import json
 import sys
 
 import requests
 
-from config import API, LLM_URL, auth_headers, load_llm_prompt, parse_response
-
-# Prompt systemowy: config_files/llm_prompt.txt (ścieżka ustawiana w config_files/api.json)
+from config import CFG, auth_headers, load_llm_prompt, parse_response
 
 
-def text_to_json(text: str, model: str = "openai/gpt-4o") -> dict:
+def text_to_json(text: str, model: str | None = None) -> dict:
+    llm = CFG["llm"]
     payload = {
-        "model": model,
+        "model": model or llm["model"],
         "messages": [
             {"role": "system", "content": load_llm_prompt()},
             {"role": "user", "content": text},
         ],
-        "temperature": API["llm_temperature"],
+        "temperature": llm["temperature"],
     }
-    response = requests.post(LLM_URL, headers=auth_headers(), json=payload, timeout=API["llm_timeout_s"])
+    response = requests.post(llm["url"], headers=auth_headers(), json=payload, timeout=llm["timeout_s"])
     result = parse_response(response)
     content = result["choices"][0]["message"]["content"].strip()
 
