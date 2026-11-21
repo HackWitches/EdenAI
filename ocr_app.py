@@ -32,13 +32,13 @@ OUT_DIR = Path(__file__).parent / "output"
 
 def load_api_key() -> str:
     key = os.environ.get("EDENAI_API_KEY")
-    env_file = Path(__file__).parent / ".env"
+    env_file = Path(__file__).parent / "config_files" / ".env"
     if not key and env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("EDENAI_API_KEY="):
                 key = line.split("=", 1)[1].strip()
     if not key:
-        sys.exit("Brak klucza: ustaw EDENAI_API_KEY w zmiennej środowiskowej lub w pliku .env")
+        sys.exit("Brak klucza: ustaw EDENAI_API_KEY w zmiennej środowiskowej lub w pliku config_files/.env")
     return key
 
 

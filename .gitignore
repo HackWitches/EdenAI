@@ -2,3 +2,7 @@
 
 # reference JSON configs shipped with the forms
 input_files/**/*.json
+
+# secrets
+.env
+config_files/.env

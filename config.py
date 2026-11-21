@@ -5,6 +5,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
+CONFIG_DIR = BASE_DIR / "config_files"  # .env, settings.json
 
 UPLOAD_URL = "https://api.edenai.run/v3/upload"
 OCR_URL = "https://api.edenai.run/v3/universal-ai"
@@ -12,15 +13,15 @@ LLM_URL = "https://api.edenai.run/v3/chat/completions"
 
 
 def load_api_key() -> str:
-    """Czyta klucz z EDENAI_API_KEY albo z pliku .env obok skryptu."""
+    """Czyta klucz z EDENAI_API_KEY albo z pliku config_files/.env."""
     key = os.environ.get("EDENAI_API_KEY")
-    env_file = BASE_DIR / ".env"
+    env_file = CONFIG_DIR / ".env"
     if not key and env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("EDENAI_API_KEY="):
                 key = line.split("=", 1)[1].strip()
     if not key:
-        sys.exit("Brak klucza: ustaw EDENAI_API_KEY w zmiennej środowiskowej lub w pliku .env")
+        sys.exit("Brak klucza: ustaw EDENAI_API_KEY w zmiennej środowiskowej lub w pliku config_files/.env")
     return key
 
 
