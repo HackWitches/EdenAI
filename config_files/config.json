@@ -3,7 +3,7 @@
 
   "input": {
     "_info": "Skąd brać pliki i gdzie zapisywać wyniki. Ścieżki względne liczone od folderu projektu.",
-    "paths": ["input_files"],
+    "paths": ["input_files\\2. Wniosek o zwrot opłaty skarbowej - formularze do cyfryzacji"],
     "extensions": [".docx", ".doc", ".odt", ".rtf", ".pdf", ".png", ".jpg", ".jpeg"],
     "output_dir": "output"
   },
