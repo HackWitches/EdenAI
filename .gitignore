@@ -1,1 +1,4 @@
 /output/
+
+# reference JSON configs shipped with the forms
+input_files/**/*.json

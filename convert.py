@@ -9,15 +9,17 @@ from config import OUTPUT_DIR
 WORD_FORMATS = (".docx", ".doc", ".odt", ".rtf")
 
 
-def to_pdf(src: str | Path) -> Path:
+def to_pdf(src: str | Path, out_dir: str | Path = OUTPUT_DIR, out_name: str | None = None) -> Path:
+    """Zwraca ścieżkę do PDF. Plik PDF/obraz zwraca bez zmian."""
     src = Path(src)
     if src.suffix.lower() not in WORD_FORMATS:
         return src  # PDF lub obraz - bez konwersji
 
     import win32com.client
 
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    dst = (OUTPUT_DIR / (src.stem.strip() + ".pdf")).resolve()
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = (out_dir / (out_name or (src.stem.strip() + ".pdf"))).resolve()
     word = win32com.client.DispatchEx("Word.Application")
     word.Visible = False
     try:
