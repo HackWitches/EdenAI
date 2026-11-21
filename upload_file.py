@@ -4,21 +4,23 @@ from pathlib import Path
 
 import requests
 
-from config import UPLOAD_URL, auth_headers, parse_response
+from config import API, UPLOAD_URL, auth_headers, parse_response
 
 
-def upload_file(file_path: str | Path, purpose: str = "ocr") -> dict:
-    """Wysyła plik do Eden AI i zwraca odpowiedź (file_id, file_name, file_size, expires_at...)."""
+def upload_file(file_path: str | Path, purpose: str | None = None) -> dict:
+    """Wysyła plik do Eden AI i zwraca odpowiedź (file_id, file_name, file_size, expires_at...).
+    purpose=None -> wartość "upload_purpose" z config_files/api.json."""
     with open(file_path, "rb") as f:
         response = requests.post(UPLOAD_URL, headers=auth_headers(), files={"file": f},
-                                 data={"purpose": purpose}, timeout=120)
+                                 data={"purpose": purpose or API["upload_purpose"]},
+                                 timeout=API["upload_timeout_s"])
     result = parse_response(response)
     if "file_id" not in result:
         sys.exit(f"Brak file_id w odpowiedzi uploadu: {result}")
     return result
 
 
-def upload_files(file_paths: list[str | Path], purpose: str = "ocr") -> list[dict | None]:
+def upload_files(file_paths: list[str | Path], purpose: str | None = None) -> list[dict | None]:
     """Upload wielu plików wg sekcji "Upload Multiple Files" z dokumentacji Eden AI.
 
     Eden AI nie ma osobnego endpointu batch: dokumentacja wysyła każdy plik osobnym

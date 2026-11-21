@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from config import BASE_DIR, CONFIG_DIR, OUTPUT_DIR
+from config import BASE_DIR, CONFIG_DIR, OUTPUT_DIR, resolve_settings
 from convert import to_pdf
 from llm import text_to_json
 from ocr import ocr_file
@@ -133,23 +133,6 @@ def main(input_paths=INPUT_PATHS, extensions=INPUT_EXTENSIONS, output_dir=OUTPUT
     return done
 
 
-def load_config_file(path: Path) -> dict:
-    """Wczytuje JSON z ustawieniami; ścieżki względne liczone od folderu projektu."""
-    try:
-        cfg = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        sys.exit(f"Niepoprawny JSON w {path}: {e}")
-    unknown = set(cfg) - set(DEFAULTS)
-    if unknown:
-        sys.exit(f"Nieznane klucze w {path}: {sorted(unknown)} (dozwolone: {sorted(DEFAULTS)})")
-    base = BASE_DIR
-    if "input_paths" in cfg:
-        cfg["input_paths"] = [str(base / p) for p in cfg["input_paths"]]
-    if "output_dir" in cfg:
-        cfg["output_dir"] = str(base / cfg["output_dir"])
-    return cfg
-
-
 def parse_args(argv=None) -> dict:
     ap = argparse.ArgumentParser(description="Pliki/foldery -> PDF -> upload -> OCR -> LLM -> JSON (Eden AI)")
     ap.add_argument("input_paths", nargs="*", metavar="PATH",
@@ -163,23 +146,11 @@ def parse_args(argv=None) -> dict:
     ap.add_argument("--llm-model", dest="llm_model", help="np. openai/gpt-4o")
     args = ap.parse_args(argv)
 
-    settings = dict(DEFAULTS)
-
-    config_path = args.config or DEFAULT_CONFIG_FILE
-    if config_path.exists():
-        print(f"Konfiguracja: {config_path}")
-        settings.update(load_config_file(config_path))
-    elif args.config:  # podany wprost, a nie istnieje -> błąd
-        sys.exit(f"Plik konfiguracyjny nie istnieje: {args.config}")
-    else:
-        print("Brak pliku konfiguracyjnego - używam argumentów i wartości domyślnych")
-
-    # argumenty podane wprost nadpisują plik konfiguracyjny
-    cli = {k: v for k, v in vars(args).items() if k != "config" and v not in (None, [])}
-    if "extensions" in cli:
+    cli = vars(args)
+    if cli["extensions"]:
         cli["extensions"] = [e if e.startswith(".") else f".{e}" for e in cli["extensions"]]
-    settings.update(cli)
-    return settings
+    return resolve_settings(DEFAULTS, cli, args.config, DEFAULT_CONFIG_FILE,
+                            path_keys=("output_dir",), path_list_keys=("input_paths",))
 
 
 if __name__ == "__main__":

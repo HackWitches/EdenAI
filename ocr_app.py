@@ -10,7 +10,9 @@ Przepływ (wg dokumentacji Eden AI):
         POST /v3/universal-ai  {"model": "ocr/ocr/<provider>", "input": {"file": file_id}}  -> output.text
 
 Użycie:
-  python ocr_app.py [ścieżka_do_pliku] [--provider amazon] [--sync] [--language pl]
+  python ocr_app.py [ścieżka_do_pliku] [--provider amazon] [--sync | --no-sync] [--language pl]
+
+Ustawienia: argumenty CLI > config_files/ocr_app.json (albo --config <plik>) > DEFAULTS poniżej.
 """
 import argparse
 import json
@@ -21,13 +23,24 @@ from pathlib import Path
 
 import requests
 
-BASE = "https://api.edenai.run/v3"
+from config import API, CONFIG_DIR, OCR_ASYNC_URL, OCR_URL, UPLOAD_URL, resolve_settings
 DEFAULT_FILE = (
     r"C:\Hackathon2026\Formularze-Wypakowane"
     r"\1. Wniosek o ustalenie numeru porządkowego nieruchomości - materiał referencyjny dla Uczestników do zadania"
     r"\Wniosek o ustalenie numeru porządkowego nieruchomości – wizualizacja formularza po cyfryzacji .docx"
 )
 OUT_DIR = Path(__file__).parent / "output"
+
+DEFAULT_CONFIG_FILE = CONFIG_DIR / "ocr_app.json"
+DEFAULTS = {
+    "file": DEFAULT_FILE,
+    "provider": "amazon",
+    "sync": False,
+    "language": None,
+    "output_dir": str(OUT_DIR),
+    "poll_interval_s": 3,
+    "poll_max_attempts": 120,
+}
 
 
 def load_api_key() -> str:
@@ -76,11 +89,11 @@ def upload(path: Path, headers: dict) -> str:
     print(f"[2/3] Upload: {path.name}")
     with open(path, "rb") as f:
         resp = requests.post(
-            f"{BASE}/upload",
+            UPLOAD_URL,
             headers=headers,
             files={"file": (path.name, f, "application/pdf" if path.suffix.lower() == ".pdf" else None)},
-            data={"purpose": "ocr"},
-            timeout=120,
+            data={"purpose": API["upload_purpose"]},
+            timeout=API["upload_timeout_s"],
         )
     data = check(resp)
     print(f"      file_id = {data['file_id']}")
@@ -91,21 +104,24 @@ def ocr_sync(file_id: str, provider: str, language: str | None, headers: dict) -
     body = {"model": f"ocr/ocr/{provider}", "input": {"file": file_id}}
     if language:
         body["input"]["language"] = language
-    data = check(requests.post(f"{BASE}/universal-ai", headers=headers, json=body, timeout=300))
+    data = check(requests.post(OCR_URL, headers=headers, json=body, timeout=API["ocr_timeout_s"]))
     if data.get("status") != "success":
         sys.exit(f"OCR nie powiódł się: {json.dumps(data, ensure_ascii=False, indent=2)}")
     return data["output"].get("text", ""), data
 
 
-def ocr_async(file_id: str, provider: str, headers: dict) -> tuple[str, dict]:
+def ocr_async(file_id: str, provider: str, headers: dict,
+              poll_interval_s: float = 3, poll_max_attempts: int = 120) -> tuple[str, dict]:
     body = {"model": f"ocr/ocr_async/{provider}", "input": {"file": file_id}}
-    job = check(requests.post(f"{BASE}/universal-ai/async", headers=headers, json=body, timeout=120))
+    job = check(requests.post(OCR_ASYNC_URL, headers=headers, json=body,
+                              timeout=API["ocr_async_create_timeout_s"]))
     job_id = job.get("public_id") or job.get("id") or job.get("job_id")
     if not job_id:
         sys.exit(f"Brak job_id w odpowiedzi: {json.dumps(job, ensure_ascii=False, indent=2)}")
     print(f"      job_id = {job_id}, czekam na wynik", end="", flush=True)
-    for _ in range(120):  # do ~6 min
-        data = check(requests.get(f"{BASE}/universal-ai/async/{job_id}", headers=headers, timeout=60))
+    for _ in range(poll_max_attempts):
+        data = check(requests.get(f"{OCR_ASYNC_URL}/{job_id}", headers=headers,
+                                  timeout=API["ocr_async_poll_timeout_s"]))
         status = data.get("status")
         if status == "success":
             print(" gotowe")
@@ -115,17 +131,34 @@ def ocr_async(file_id: str, provider: str, headers: dict) -> tuple[str, dict]:
             print()
             sys.exit(f"OCR nie powiódł się: {json.dumps(data, ensure_ascii=False, indent=2)}")
         print(".", end="", flush=True)
-        time.sleep(3)
+        time.sleep(poll_interval_s)
     sys.exit("\nPrzekroczono czas oczekiwania na wynik OCR")
 
 
-def main() -> None:
+def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="OCR pliku przez Eden AI")
-    ap.add_argument("file", nargs="?", default=DEFAULT_FILE)
-    ap.add_argument("--provider", default="amazon", help="np. amazon, microsoft, mistral, google")
-    ap.add_argument("--sync", action="store_true", help="użyj synchronicznego ocr/ocr zamiast ocr_async")
+    ap.add_argument("file", nargs="?", default=None)
+    ap.add_argument("-c", "--config", type=Path, default=None,
+                    help="plik konfiguracyjny JSON (domyślnie config_files/ocr_app.json, jeśli istnieje)")
+    ap.add_argument("--provider", default=None, help="np. amazon, microsoft, mistral, google")
+    ap.add_argument("--sync", action=argparse.BooleanOptionalAction, default=None,
+                    help="synchroniczny ocr/ocr zamiast ocr_async (--no-sync wymusza async)")
     ap.add_argument("--language", default=None, help="kod języka dla trybu sync, np. pl")
-    args = ap.parse_args()
+    ap.add_argument("-o", "--output-dir", dest="output_dir", default=None, help="folder wyjściowy")
+    ap.add_argument("--poll-interval", dest="poll_interval_s", type=float, default=None,
+                    help="sekundy między odpytaniami w trybie async")
+    ap.add_argument("--poll-max-attempts", dest="poll_max_attempts", type=int, default=None,
+                    help="maks. liczba odpytań w trybie async")
+    args = ap.parse_args(argv)
+    settings = resolve_settings(DEFAULTS, vars(args), args.config, DEFAULT_CONFIG_FILE,
+                                path_keys=("file", "output_dir"))
+    return argparse.Namespace(**settings)
+
+
+def main() -> None:
+    global OUT_DIR
+    args = parse_args()
+    OUT_DIR = Path(args.output_dir)
 
     src = Path(args.file)
     if not src.exists():
@@ -140,7 +173,7 @@ def main() -> None:
     if args.sync:
         text, raw = ocr_sync(file_id, args.provider, args.language, headers)
     else:
-        text, raw = ocr_async(file_id, args.provider, headers)
+        text, raw = ocr_async(file_id, args.provider, headers, args.poll_interval_s, args.poll_max_attempts)
 
     OUT_DIR.mkdir(exist_ok=True)
     stem = src.stem.strip()
