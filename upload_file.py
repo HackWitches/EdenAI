@@ -1,45 +1,18 @@
-import os
+"""Krok 2: upload pliku - POST https://api.edenai.run/v3/upload"""
 import sys
 from pathlib import Path
 
 import requests
 
-
-def load_api_key() -> str:
-    key = os.environ.get("EDENAI_API_KEY")
-    env_file = Path(__file__).parent / ".env"
-    if not key and env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("EDENAI_API_KEY="):
-                key = line.split("=", 1)[1].strip()
-    if not key:
-        sys.exit("Brak klucza: ustaw EDENAI_API_KEY w zmiennej środowiskowej lub w pliku .env")
-    return key
+from config import UPLOAD_URL, auth_headers, parse_response
 
 
-url = "https://api.edenai.run/v3/upload"
-headers = {
-    # Eden AI wymaga prefiksu "Bearer " przed kluczem
-    "Authorization": f"Bearer {load_api_key()}"
-}
-
-file_path = (
-    "C:\\Hackathon2026\\Formularze-Wypakowane\\1. Wniosek o ustalenie numeru porządkowego nieruchomości"
-    " - materiał referencyjny dla Uczestników do zadania\\Wniosek o ustalenie numeru porządkowego nieruchomości.docx"
-)
-
-data = {
-    "purpose": "assistants"  # Optional: describe intended use
-}
-
-with open(file_path, "rb") as f:
-    response = requests.post(url, headers=headers, files={"file": f}, data=data, timeout=120)
-
-result = response.json()
-if not response.ok or "file_id" not in result:
-    sys.exit(f"Upload nie powiódł się (HTTP {response.status_code}): {result}")
-
-print(f"File ID: {result['file_id']}")
-print(f"Filename: {result['file_name']}")
-print(f"Size: {result['file_size']} bytes")
-print(f"Expires at: {result['expires_at']}")
+def upload_file(file_path: str | Path, purpose: str = "ocr") -> dict:
+    """Wysyła plik do Eden AI i zwraca odpowiedź (file_id, file_name, file_size, expires_at...)."""
+    with open(file_path, "rb") as f:
+        response = requests.post(UPLOAD_URL, headers=auth_headers(), files={"file": f},
+                                 data={"purpose": purpose}, timeout=120)
+    result = parse_response(response)
+    if "file_id" not in result:
+        sys.exit(f"Brak file_id w odpowiedzi uploadu: {result}")
+    return result
